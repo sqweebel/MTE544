@@ -147,11 +147,11 @@ void bresenham(int x0, int y0, int x1, int y1, std::vector<int> &x, std::vector<
 
 
 float normpdf(float meas, float mean, float sigma){
-    return 1/(sigma*sqrt(2*M_PI))*exp(-pow(abs(meas-mean),2)/(2*pow(sigma,2)));
+    return ( 1 / (sigma*sqrt(2*M_PI) ) ) * exp( -0.5 * pow( (meas-mean) / sigma,2));
 }
 
 
-int P = 100;  //Number of particles
+int P = 10;  //Number of particles
 Eigen::MatrixXf state_previous(3,1);
 Eigen::MatrixXf state_current(3,1);
 Eigen::MatrixXf state_update(3,1);
@@ -270,19 +270,18 @@ int main(int argc, char **argv) {
 		        Xp(0,i) = X(0,i) + odom_vx*cos(ips_yaw) + e(0);
 		        Xp(1,i) = X(1,i) + e(1);
 		        Xp(2,i) = X(2,i) + e(2); 
-		    
+		    	ROS_INFO("meas: %f, mean: %f, sigma: %f", meas(0),Xp(0,i),Q);
 		        w(0,i) = normpdf(meas(0),Xp(0,i),Q);
+		        ROS_INFO("Weighting: %f", w(0,i));
+	
 
-		        ROS_INFO("Xp: %f", Xp(0,i));
-		        ROS_INFO("pdf: %f",normpdf(Xp(0,i)-2*Q,Xp(0,i),Q));
-
-		        if(w(0,i) > normpdf(Xp(0,i)-2*Q,Xp(0,i),Q)){ 
+		        if(w(0,i) > 0.2){ 
 		        	
 				    X(0,i) = Xp(0,i);
 				    sum_x += Xp(0,i);
 				    counter_x += 1;
 		        }
-		        else if(w(0,i) <= normpdf(Xp(0,i)-2*Q,Xp(0,i),Q)){
+		        else if(w(0,i) <= 0.2){
 			    	X(0,i) = 0;
 		        }
 		    }
