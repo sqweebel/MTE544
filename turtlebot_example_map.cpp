@@ -40,7 +40,7 @@ double scan_time;
 double range_min;
 double range_max;
 std::vector<float> ranges;
-float res = 10;
+float res = 5;
 int gridSize = 10*res;
 
 
