@@ -96,6 +96,14 @@ quat e2q(double pitch, double roll, double yaw){
     return q_temp;
 
 }
+
+float mean(Eigen::Ref<Eigen::ArrayXf> X){
+	float sum = 0;
+	for(int i=0;i<X.size();i++){
+		sum += X(i);
+	}
+	return sum/X.size();
+}
 //Callback function for the Position topic (LIVE)
 /*
 void pose_callback(const geometry_msgs::PoseWithCovarianceStamped& msg)
@@ -169,14 +177,14 @@ Eigen::MatrixXf X(3,P);
 Eigen::MatrixXf w(3,P);
 Eigen::MatrixXf W(3,P);
 std::default_random_engine generator;
-float R = 0.1;
-float Q = 0.1;
+float R = 0.01;
+float Q = 0.01;
 Eigen::MatrixXf Xp(3,P);
 float V;
 float U;
 float mean_x;
 float mean_y;
-float mean_z;
+float mean_yaw;
 float dt = 0.05;
 float seed;
 quat q;
@@ -266,7 +274,6 @@ int main(int argc, char **argv) {
 	        Xp(0,i) = X(0,i) + odom_vx*cos(state_previous(2))*0.05 + e(0);
 	        Xp(1,i) = X(1,i) + odom_vx*sin(state_previous(2))*0.05 + e(1);
 	        Xp(2,i) = X(2,i) + odom_az*0.05 + e(2); 
-	        ROS_INFO("first yaw: %f", Xp(2,i));
 	        if(Xp(2,i)>2*M_PI){
         		Xp(2,i)=Xp(2,i)-2*M_PI;
         	}
@@ -289,7 +296,7 @@ int main(int argc, char **argv) {
 	    }
 	    for(int i=0;i<P;i++){ //Take particle that is correct for our range and add it to the particle set
 	    	seed = rand(generator);
-	    	//ROS_INFO("seed: %f", seed);
+
 	    	for(int j=0;j<P;j++){
 	    		//seed = rand(generator);
 	    		if(W(0,j)>W(0,P-1)*seed){
@@ -297,7 +304,7 @@ int main(int argc, char **argv) {
 					break;
 	    		}
 	    	}
-	    	//ROS_INFO("Continuing...");
+
 	    	for(int j=0;j<P;j++){
 	    		//seed = rand(generator);
 	    	
@@ -334,15 +341,18 @@ int main(int argc, char **argv) {
 			pose.orientation.y = q.y;
 			pose.orientation.z = q.z;
 			pose.orientation.w = q.w;
-			ROS_INFO("second yaw: %f, w: %f", X(2,i),q.w);
 
 		    pose_array.poses.push_back(pose);			    
 		}
 
+		mean_x = mean(X.col(0));
+		mean_y = mean(X.col(1));
+		mean_yaw = mean(X.col(2));
+
 		pose_array_publisher.publish(pose_array);
-		state_previous(0) = state_current(0);
-		state_previous(1) = state_current(1);
-		state_previous(2) = state_current(2);
+		state_previous(0) = mean_x;
+		state_previous(1) = mean_y;
+		state_previous(2) = mean_yaw;;
 
     }
     return 0;

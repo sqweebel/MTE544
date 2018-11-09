@@ -38,9 +38,9 @@ double angle_increment; //Angular distance between each consecutive laser beam
 double time_increment; //Not important (i think)
 double scan_time; //Not important
 double range_min; //Minimum range that laser can travel (i don't use in this code, maybe i should)
-double range_max; //Maximum range that laser can travel (also not used)
+double range_max; //Maximum range that laser can travel 
 std::vector<float> ranges; //Vector of floats that will contain the distances each laser travelled
-float res = 5; //Resolution of the occupancy grid. Note that I assume a base size of 10x10 - and then the resolution splits each grid into subgrids
+float res = 10; //Resolution of the occupancy grid. Note that I assume a base size of 10x10 - and then the resolution splits each grid into subgrids
                //So for example, if resolution is 5, each single grid is broken into a 5x5 subgrid, so the resulting map is then 50x50
 int gridSize = 10*res; //Per the previous comment, this value determines the size of the occupancy grid
 
@@ -203,33 +203,38 @@ int main(int argc, char **argv) {
     	    angles = round((angle_max - angle_min)/angle_increment); //Find number of angles through which to loop
            	    //ROS_INFO("# Angles: %d", angles);
             for(int i=0;i<angles;i++){ //Loop through all the angles
-    		
-        	 	angle = (ips_yaw + angle_min) + i*angle_increment; //Pick an angle
-        		x.clear(); //Clear x and y so we don't retain old values
-         	   	y.clear();
+        		if(!(std::isnan(ranges[i]))){
+            	 	angle = (ips_yaw + angle_min) + i*angle_increment; //Pick an angle
+            		x.clear(); //Clear x and y so we don't retain old values
+             	   	y.clear();
 
-    
-        		if(!(std::isnan(ranges[i]))){ //If a laser doesn't hit anything, NaN is returned - so no need to update map for range of NaN
+        
+
         		    x0 = floor(ips_x*res);
         		    y0 = floor(ips_y*res);
-        		    x1 = floor((ips_x + ranges[i]*cos(angle))*res);
-        		    y1 = floor((ips_y + ranges[i]*sin(angle))*res); //These lines obtain the position of the robot and the position of the object which a laser hit
-                                                                    //
 
-        		    bresenham(x0,y0,x1,y1,x,y);
+                    x1 = floor((ips_x + ranges[i]*cos(angle))*res);
+                    y1 = floor((ips_y + ranges[i]*sin(angle))*res); //These lines obtain the position of the robot and the position of the object which a laser hit 
+                    
+
+                    bresenham(x0,y0,x1,y1,x,y);
                     Eigen::ArrayXXf bresenhamResult(x.size(),3);
-        		    
-        		    for(int j = 0; j<x.size();j++){//Map bresenham x and y vectors to bresenham results map                     
+        		    for(int j=0;j<x.size();j++){//Map bresenham x and y vectors to bresenham results map                     
 
                         bresenhamResult(j, 0) = x[j];
 
                         bresenhamResult(j, 1) = y[j];
 
-                        if(j == x.size()-1){
-                            bresenhamResult(j,2) = 60;
+                        if(j == (x.size()-1)){
+                            if(!(std::isnan(ranges[i]))){
+                                bresenhamResult(j,2) = 0.7;  
+                            } 
+                            else if(std::isnan(ranges[i])){
+                                bresenhamResult(j,2) = 0.3;
+                            }
                         }
-                        else{
-                            bresenhamResult(j,2) = 40;
+                        else if(j<(x.size()-1)){
+                            bresenhamResult(j,2) = 0.3;
                         }
         			    if(y[j]>(10*res - 1)){
         				    y[j] = 10*res - 1;
@@ -243,25 +248,21 @@ int main(int argc, char **argv) {
         			    if(x[j]<0){
         				    x[j] = 0;
         			    }
-        			    else{
-                            map(y[j], x[j]) = map(y[j], x[j]) + log(bresenhamResult(j,2)/(100-bresenhamResult(j,2)));
-        			    }
-        			    if(map(y[j],x[j])>=100){
-        			    	map(y[j], x[j]) = 100;
-        			    }
-        			    if(map(y[j],x[j])<0){
-        				    map(y[j],x[j]) = 0;
-        			    }   
-        			    beliefMap.data.clear();
-        			    for(int p=0;p<map.cols();p++){
-        			        for(int l=0;l<map.rows();l++){
-        				        beliefMap.data.push_back(map(p, l));
+                        map(y[j], x[j]) = map(y[j], x[j]) + log(bresenhamResult(j,2)/(1-bresenhamResult(j,2)));
+                    }
+            			 	
+                    
+                    beliefMap.data.clear();
+                        for(int p=0;p<map.cols();p++){
+                            for(int l=0;l<map.rows();l++){
+                                beliefMap.data.push_back( 100 * ( exp(map(p,l)) / ( 1+exp(map(p,l)) ) ) );
                             }
-        				}    
-                    }    
-        		    map_pub.publish(beliefMap); 	
-                } 
-		    }				
+                        }    
+                   
+                    map_pub.publish(beliefMap); 
+                
+                }
+		    }		
 	    } 	
     }
     return 0;
