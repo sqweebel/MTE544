@@ -219,6 +219,214 @@ bool check_collision(double x1, double y1, double x2, double y2, const Eigen::Ma
   return false;
 }
 
+void a_star(Eigen::MatrixXf &milestones, Eigen::MatrixXd &connections, int start, int end, int numMilestones){
+  ROS_INFO("running a_star");
+  //Find edge lengths
+  Eigen::MatrixXf dists = Eigen::MatrixXf::Zero(numMilestones,numMilestones);
+  int o_size = 1; //size of open set
+  int c_size = 0; //size of closed set
+  Eigen::MatrixXf open(4,o_size);
+  Eigen::MatrixXf open_temp(4,o_size);
+  Eigen::MatrixXf closed;
+  double dmax;
+  visualization_msgs::Marker line_list2;
+  ROS_INFO("start: %d, starting node x: %f y: %f",start,milestones(0,0),milestones(1,0));
+  ROS_INFO("end: %d, ending node x: %f y: %f",end,milestones(0,1),milestones(1,1));
+  for(int i=0;i<numMilestones;i++){
+    for(int j=0;j<numMilestones;j++){
+      if(connections(i,j)){
+        dists(i,j) = get_dist(milestones(0,i),milestones(1,i),milestones(0,j),milestones(1,j));
+        dists(j,i) = dists(i,j);
+      }
+    }
+  }
+
+  dmax = get_dist(milestones(0,start),milestones(1,start),milestones(0,end),milestones(1,end));
+  ROS_INFO("dmax: %f",dmax);
+
+  open(0,0) = start; //node position
+  open(1,0) = 0; // back pointer
+  open(2,0) = dmax; //lower bound cost
+  open(3,0) = 0; // current cost
+  ROS_INFO("open set made");
+
+  bool done = 0;
+  float best;
+  int best_ind;
+  while(!done){
+    //find best node in open set
+    best = 1000;
+    for(int i=0;i<o_size;i++){
+      if(open(2,i)<=best){
+        best = open(2,i);
+        best_ind = i;
+        //ROS_INFO("found new best");
+      }
+    }
+    //ROS_INFO("best node is at: %d, corresponds to node: %f",best_ind,open(0,best_ind));
+    //move best node to closed set
+    c_size += 1;
+    //ROS_INFO("c_size: %d",c_size);
+    closed.conservativeResize(4,c_size);
+
+    closed(0,c_size-1) = open(0,best_ind);
+    closed(1,c_size-1) = open(1,best_ind);
+    closed(2,c_size-1) = open(2,best_ind);
+    closed(3,c_size-1) = open(3,best_ind);
+    ROS_INFO("added: %f, %f, %f, %f",closed(0,c_size-1),closed(1,c_size-1),closed(2,c_size-1),closed(3,c_size-1));
+    //ROS_INFO("added best node to closed set");
+    //Check if end reached
+    if(open(0,best_ind)==end){
+      //ROS_INFO("current ind at stop: %f",open(0,best_ind));
+      done = 1;
+      continue;
+    }
+    int numNeighbours = 0;
+    //Get all neighbours of best node
+   // ROS_INFO("current ind: %f",open(0,best_ind));
+    for(int i=0;i<numMilestones;i++){
+      if(connections(open(0,best_ind),i)){
+        //ROS_INFO("connect between %f and %d",open(0,best_ind),i);
+        numNeighbours += 1;
+      }
+    }
+    //ROS_INFO("node has %d neighbours",numNeighbours);
+    Eigen::ArrayXf neighbours(numNeighbours);
+    int index = 0;
+    for(int i=0;i<numMilestones;i++){
+      //ROS_INFO("i is: %d",i);
+      if(connections(open(0,best_ind),i)){
+
+        neighbours(index) = i;
+        index += 1;
+        //ROS_INFO("neighbour at: %d",i);
+      }
+    }
+    //ROS_INFO("finished finding neighbours");
+    bool found_closed;
+    bool found_open;
+    double dtogo;
+    double dcur;
+    int found_open_ind;
+    for(int i=0;i<numNeighbours;i++){
+      //Check if neighbour is already in closed set
+      found_closed = false;
+      for(int j=0;j<c_size;j++){
+        if(neighbours(i) == closed(0,j)){
+          found_closed = true;
+        }
+      }
+      if(found_closed){
+        continue;
+      }
+      //ROS_INFO("checked if neighbour in closed set");
+
+      dtogo = get_dist(milestones(0,neighbours(i)),milestones(1,neighbours(i)),milestones(0,end),milestones(1,end));
+      dcur = open(3,best_ind) + dists(open(0,best_ind),neighbours(i));
+      //ROS_INFO("distances calculated");
+      for(int j=0;j<o_size;j++){
+        found_open = false;
+        if(neighbours(i) == open(0,j)){
+          found_open = true;
+          found_open_ind = j;
+        }
+      }
+      //ROS_INFO("checked if neighbour in open set");
+      if(!found_open){
+        //Add this node to open set
+        o_size += 1;
+        //ROS_INFO("open size: %d",o_size);
+        open.conservativeResize(4, o_size);
+        open(0,o_size-1) = neighbours(i);
+        open(1,o_size-1) = open(0,best_ind);
+        open(2,o_size-1) = dtogo+dcur;
+        open(3,o_size-1) = dcur;
+
+        //ROS_INFO("added: %f, %f, %f, %f",open(0,o_size-1),open(1,o_size-1),open(2,o_size-1),open(3,o_size-1));
+
+      }
+      else{
+        //ROS_INFO("found in open set at: %d",found_open_ind);
+        //Node is already in open set. Check if its better than the node currently in its place.
+        //ROS_INFO("neighbours(%d): %f",i,neighbours(i));
+        //ROS_INFO("open set size: %ld",open.size());
+        if(dcur < open(3,found_open_ind)){
+          ROS_INFO("replacing");
+          open(0,found_open_ind) = neighbours(i);
+          open(1,found_open_ind) = open(0,best_ind);
+          open(2,found_open_ind) = dtogo+dcur;
+          open(3,found_open_ind) = dcur;
+        }
+        //SROS_INFO("past if statement");
+      }
+    }
+
+    //ROS_INFO("open set modification finished");
+    o_size -= 1;
+    ROS_INFO("o_size: %d",o_size);
+    ROS_INFO("c_size: %d",c_size);
+    //ROS_INFO("new o size: %d",o_size);
+    index = 0;
+    open_temp.conservativeResize(4,o_size);
+    for(int i=0;i<o_size+1;i++){
+      if(i != best_ind){
+        //ROS_INFO("index: %d",index);
+        //ROS_INFO("open(0,i): %f, best_ind: %d",open(0,i),best_ind);
+        open_temp(0,index) = open(0,i);
+        open_temp(1,index) = open(1,i);
+        open_temp(2,index) = open(2,i);
+        open_temp(3,index) = open(3,i);
+        index += 1;
+        //ROS_INFO("open: %f, %f, %f, %f",open(0,i),open(1,i),open(2,i),open(3,i));
+        //ROS_INFO("open_temp: %f, %f, %f, %f",open_temp(0,index-1),open_temp(1,index-1),open_temp(2,index-1),open_temp(3,index-1));
+         
+      }
+    }
+    open.conservativeResize(4,o_size);
+    //ROS_INFO("changing open set");
+    open = open_temp;
+  }
+
+
+  for(int i=0;i<c_size;i++){
+    //ROS_INFO("closed(0,%d): %f",i,closed(0,i));
+    //ROS_INFO("closed(1,%d): %f",i,closed(1,i));
+    //ROS_INFO("closed(2,%d): %f",i,closed(2,i));
+    //ROS_INFO("closed(3,%d): %f",i,closed(3,i));
+
+  }
+
+
+
+  line_list2.id = 2;
+  line_list2.header.frame_id = "/base_link";
+  line_list2.type = visualization_msgs::Marker::LINE_LIST;
+  line_list2.scale.x = 0.1;
+  line_list2.scale.y = 0.1;
+  line_list2.scale.z = 0.1;
+  line_list2.color.g = 1.0;
+  line_list2.color.a = 1.0;
+
+  geometry_msgs::Point p;
+  line_list2.points.clear();
+  for(int i=0;i<c_size;i++){
+    for(int j=0;j<c_size;j++){
+        p.x = milestones(0,closed(1,i));
+        p.y = milestones(1,closed(1,i));
+        line_list2.points.push_back(p);
+        p.x = milestones(0,closed(1,j));
+        p.y = milestones(1,closed(1,j));
+        line_list2.points.push_back(p);
+    }
+  }
+
+  marker_publisher.publish(line_list2);
+
+
+ROS_INFO("finished planning");
+
+}
+
 Eigen::MatrixXf GenerateProbabilisticRoadMap(Eigen::MatrixXd &obstacleMap, Eigen::MatrixXd &nodeMap, int numNodes){
  // ROS_INFO("Running");
   Eigen::MatrixXf points(3,numNodes);  
@@ -233,7 +441,14 @@ Eigen::MatrixXf GenerateProbabilisticRoadMap(Eigen::MatrixXd &obstacleMap, Eigen
   int numMilestones = numNodes;
   visualization_msgs::Marker line_list;
 
-  for(int i = 0; i < numNodes; i++){ //Generate nodes at random
+  points(0,0) = 1;
+  points(1,0) = 1;
+  points(2,0) = 0;
+  points(0,1) = 9;
+  points(1,1) = 9;
+  points(2,1) = 0;
+
+  for(int i = 2; i < numNodes; i++){ //Generate nodes at random
     points(0,i) = distribution(generator);
     points(1,i) = distribution(generator);
     points(2,i) = 0;
@@ -273,11 +488,14 @@ Eigen::MatrixXf GenerateProbabilisticRoadMap(Eigen::MatrixXd &obstacleMap, Eigen
       }
     }
   }
-
   //Create milestones list
-  Eigen::MatrixXf milestones(2,numMilestones);
-  index = 0;
-  for(int i=0;i<numNodes;i++){
+  Eigen::MatrixXf milestones(2,numMilestones); //+2 because need to add start and end points
+  milestones(0,0) = 1;
+  milestones(1,0) = 1; //Start
+  milestones(0,1) = 9;
+  milestones(1,1) = 9; //end
+  index = 2;
+  for(int i=0;i<numNodes-2;i++){
     if(points(2,i) == 0){
       milestones(0,index) = points(0,i);
       milestones(1,index) = points(1,i);
@@ -293,7 +511,6 @@ Eigen::MatrixXf GenerateProbabilisticRoadMap(Eigen::MatrixXd &obstacleMap, Eigen
   //Connect milestones
   for(int i=0;i<numMilestones;i++){
     for(int j=0;j<numMilestones;j++){
-
       dists(j) = get_dist(milestones(0,i),milestones(1,i),milestones(0,j),milestones(1,j));
     }
 
@@ -302,13 +519,13 @@ Eigen::MatrixXf GenerateProbabilisticRoadMap(Eigen::MatrixXd &obstacleMap, Eigen
     for(int k=0;k<n;k++){
       //Keep in mind: i represents the current milestone
       //ROS_INFO("index: %f, x: %f, y: %f",sorted_dists(1,k),milestones(0,sorted_dists(1,k)),milestones(1,sorted_dists(1,k)));
-      if (!check_collision(milestones(0,i),milestones(1,i),milestones(0,sorted_dists(1,k)),milestones(1,sorted_dists(1,k)),obstacleCoords,numObstacles)){
-        //ROS_INFO("No collision");
+      if (!check_collision(milestones(0,i),milestones(1,i),milestones(0,sorted_dists(1,k)),milestones(1,sorted_dists(1,k)),obstacleCoords,numObstacles) && (i != sorted_dists(1,k))){
         connections(i,sorted_dists(1,k)) = 1;
         connections(sorted_dists(1,k),i) = 1; //If i is connected to j, then j is connected to i
       }
     }
   }
+
 
   line_list.id = 1;
   line_list.header.frame_id = "/base_link";
@@ -335,8 +552,12 @@ Eigen::MatrixXf GenerateProbabilisticRoadMap(Eigen::MatrixXd &obstacleMap, Eigen
     }
   }
 
-  marker_publisher.publish(line_list);
+  //The milestones and the connections have been made. Time to find the shortest path.
 
+  std::vector<int> indices; //Indices of milestones which reprsesent shortest path to destination
+  marker_publisher.publish(line_list);
+  a_star(milestones, connections, 0, 1, numMilestones);
+  
 
   return points;
 
@@ -399,7 +620,6 @@ int main(int argc, char **argv)
       
       velocity_publisher.publish(vel); // Publish the command velocity
       marker_publisher.publish(marker);
-
     }
     return 0;
 }
