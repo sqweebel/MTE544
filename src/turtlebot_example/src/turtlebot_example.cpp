@@ -25,7 +25,7 @@
 #include <nav_msgs/OccupancyGrid.h>
 #include <std_msgs/ColorRGBA.h>
 
-visualization_msgs::Marker marker;
+
 ros::Publisher marker_publisher;
 #define TAGID 0
 
@@ -35,15 +35,23 @@ double XPos,YPos, theta;
 Eigen::MatrixXd map(100,100);
 bool mapComplete = false;
 
-void pose_callback(const geometry_msgs::PoseWithCovarianceStamped &msg)
-{
-  //This function is called when a new position message is received
-  double XPos = msg.pose.pose.position.x; // Robot X psotition
-  double YPos = msg.pose.pose.position.y; // Robot Y psotition
-  double theta = tf::getYaw(msg.pose.pose.orientation); // Robot Yaw
+void pose_callback(const gazebo_msgs::ModelStates &msg) {
 
-  // std::cout << "X: " << XPos << ", Y: " << YPos << ", Yaw: " << theta << std::endl ;
+  int i;
+  for (i = 0; i < msg.name.size(); i++)
+      if (msg.name[i] == "mobile_base")
+          break;
+
+  XPos = msg.pose[i].position.x;
+  YPos = msg.pose[i].position.y;
+  theta = tf::getYaw(msg.pose[i].orientation);
+
+  if(theta<0){ //need to map
+    theta += 2*M_PI;
+  }
 }
+
+
 
 //Example of drawing a curve
 void drawCurve(int k) 
@@ -83,8 +91,6 @@ void drawCurve(int k)
 
 }
 
-
-
 //Callback function for the map
 void map_callback(const nav_msgs::OccupancyGrid& msg)
 {
@@ -96,47 +102,10 @@ void map_callback(const nav_msgs::OccupancyGrid& msg)
           map(i,j) = msg.data[i*100 + j];
           if(map(i,j)>1){
             mapComplete = true;
-            //ROS_INFO("map ready");
           }
       }      
     }
-  
 }
-
-// std::vector<std::vector<int> > sortDistances(const Eigen::MatrixXf &distances, const Eigen::MatrixXd &nodeList){
-//   ROS_INFO("Entered");
-//   int index = -1;
-//   int misplacedValue = -1;
-//   int temp = -1;
-//   float tempDistance;
-//   float tempIndex;
-
-//   for(int i = 0; i < distances.size(); i++){ //Copy Vector
-//     dist[0] = distances[i];
-//     dist[1] = i;
-//     sortedDistances.push_back(dist);
-//   }
-//   for(int i = 1; i < sortedDistances.size(); i++){ //Insertion sort
-
-//     if(sortedDistances[i][0] < sortedDistances[i-1][0]){
-      
-//       for(int j = i; j>=0; j--){
-//         if(sortedDistances[j][0]<sortedDistances[j-1][0]){
-//           tempDistance = sortedDistances[j+1][0];
-//           tempIndex = sortedDistances[j+1][1];
-//           sortedDistances[j][0] = sortedDistances[j-1][0];
-//           sortedDistances[j][1] = sortedDistances[j-1][1];
-//           sortedDistances[j-1][0] = tempDistance;
-//           sortedDistances[j-1][1] = tempIndex;
-//         }
-//       }
-//     }
-
-//   }
-//   return sortedDistances;
-
-// }
-
 
 double get_dist(double x1, double y1, double x2, double y2){
   return sqrt( pow(x1-x2,2) + pow(y1-y2,2) );
@@ -194,13 +163,12 @@ Eigen::MatrixXf sort(Eigen::ArrayXf &list){
   return sorted;
 }
 
-bool check_collision(double x1, double y1, double x2, double y2, const Eigen::MatrixXf &obstacleCoords, int numObstacles){
+bool check_collision(double x1, double y1, double x2, double y2, const Eigen::MatrixXf &obstacleCoords, int numObstacles, double buffer){
   //ROS_INFO("checking collision");
   double inc = 0.1;
   int steps = 10;
   double dx = x2 - x1;
   double dy = y2 - y1;
-  double buffer = 0.3;
   double x;
   double y;
   double dist;
@@ -222,8 +190,7 @@ bool check_collision(double x1, double y1, double x2, double y2, const Eigen::Ma
   return false;
 }
 
-void a_star(Eigen::MatrixXf &milestones, Eigen::MatrixXd &connections, int start, int end, int numMilestones){
-  ROS_INFO("running a_star");
+Eigen::ArrayXd a_star(Eigen::MatrixXf &milestones, Eigen::MatrixXd &connections, int start, int end, int numMilestones){
   //Find edge lengths
 
   Eigen::MatrixXf dists = Eigen::MatrixXf::Zero(numMilestones,numMilestones);
@@ -387,34 +354,8 @@ void a_star(Eigen::MatrixXf &milestones, Eigen::MatrixXd &connections, int start
       point.y = milestones(1,closed(0,i));
       closed_points.points.push_back(point);
     }
-
   marker_publisher.publish(closed_points);
-  ROS_INFO("c_size: %d, o_size: %d",c_size,o_size);
-  // for(int m=0;m<100000000;m++){
-
-  // }
-
   }
-  std::ofstream file1;
-  std::ofstream file2;
-  file1.open("/home/colin/closed set.txt");
-
-  for(int i=0;i<c_size;i++){
-    file1 << closed(0,i) << ", ";
-    file1 << closed(1,i) << ", ";
-    file1 << closed(2,i) << ", ";
-    file1 << closed(3,i) << ", ";
-    file1 << "\n";
-  }
-  file2.open("/home/colin/open set.txt");
-  for(int i=0;i<o_size-1;i++){
-    file2 << open(0,i) << ", ";
-    file2 << open(1,i) << ", ";
-    file2 << open(2,i) << ", ";
-    file2 << open(3,i) << ", ";
-    file2 << "\n";
-  }
-
 
   geometry_msgs::Point point;
     for(int i = 0; i < c_size; i++){
@@ -423,12 +364,8 @@ void a_star(Eigen::MatrixXf &milestones, Eigen::MatrixXd &connections, int start
       closed_points.points.push_back(point);
     }
 
-
-
   marker_publisher.publish(closed_points);
 
-
-  ROS_INFO("finished planning. Finding shortest path.");
 
   done = 0;
   double cur = end;
@@ -448,7 +385,7 @@ void a_star(Eigen::MatrixXf &milestones, Eigen::MatrixXd &connections, int start
       done = 1;
     }
     cur = prev;
-    ROS_INFO("back tracking...");
+
     for(int i=0;i<c_size;i++){
       if(closed(0,i)==cur){
         curC = i;
@@ -460,7 +397,6 @@ void a_star(Eigen::MatrixXf &milestones, Eigen::MatrixXd &connections, int start
     spath(spath_size-1) = cur;
 
   }
-  ROS_INFO("shortest path found");
 
   visualization_msgs::Marker line_list2;
 
@@ -485,38 +421,34 @@ void a_star(Eigen::MatrixXf &milestones, Eigen::MatrixXd &connections, int start
     line_list2.points.push_back(p);
   }
 
-
   marker_publisher.publish(line_list2);
-
-
+  return spath;
 }
 
-Eigen::MatrixXf GenerateProbabilisticRoadMap(Eigen::MatrixXd &obstacleMap, Eigen::MatrixXd &nodeMap, int numNodes){
+Eigen::MatrixXf GenerateProbabilisticRoadMap(Eigen::MatrixXd &obstacleMap, int numNodes, Eigen::MatrixXf start, Eigen::MatrixXf end){
   Eigen::MatrixXf points(3,numNodes);  
-  int mapWidth = 100;
-  int mapLength = 100;
+  int mapWidth = obstacleMap.rows();
+  int mapLength = obstacleMap.cols();
   double dist;
-  double buffer = 0.3;
+  double buffer = 0.25;
   std::default_random_engine generator;
   std::uniform_real_distribution<double> distribution(0.0,10.0);
-  int obstacleFoundFlag = 0;
   int numObstacles = 0;
   int numMilestones = numNodes;
   visualization_msgs::Marker line_list;
 
-  points(0,0) = 1;
-  points(1,0) = 1;
+  points(0,0) = start(0);
+  points(1,0) = start(1);
   points(2,0) = 0;
-  points(0,1) = 9;
-  points(1,1) = 9;
-  points(2,1) = 0;
+  points(0,1) = end(0);
+  points(1,1) = end(1);
+  points(2,1) = 0; //Add start and end nodes to set
 
   for(int i = 2; i < numNodes; i++){ //Generate nodes at random
     points(0,i) = distribution(generator);
     points(1,i) = distribution(generator);
     points(2,i) = 0;
   }
-
 
   //Find number of obstacles
   for(int i=0;i<mapWidth;i++){
@@ -561,17 +493,12 @@ Eigen::MatrixXf GenerateProbabilisticRoadMap(Eigen::MatrixXd &obstacleMap, Eigen
       index += 1;
     }
   }
-  
 
-  milestones(0,0) = 1;
-  milestones(1,0) = 1; //Start
-  milestones(0,1) = 9;
-  milestones(1,1) = 9; //end
 
   Eigen::ArrayXf dists(numMilestones);
   Eigen::MatrixXf sorted_dists(2,numMilestones);
   Eigen::MatrixXd connections = Eigen::MatrixXd::Zero(numMilestones,numMilestones);
-  int n = 10; //Number of closest points to look at
+  int numConnections = 10; //Number of closest points to look at
 
   //Connect milestones
   for(int i=0;i<numMilestones;i++){
@@ -581,9 +508,9 @@ Eigen::MatrixXf GenerateProbabilisticRoadMap(Eigen::MatrixXd &obstacleMap, Eigen
 
     sorted_dists = sort(dists);
 
-    for(int k=0;k<n;k++){
+    for(int k=0;k<numConnections;k++){
       //Keep in mind: i represents the current milestone
-      if (!check_collision(milestones(0,i),milestones(1,i),milestones(0,sorted_dists(1,k)),milestones(1,sorted_dists(1,k)),obstacleCoords,numObstacles) && (i != sorted_dists(1,k))){
+      if (!check_collision(milestones(0,i),milestones(1,i),milestones(0,sorted_dists(1,k)),milestones(1,sorted_dists(1,k)),obstacleCoords,numObstacles,buffer) && (i != sorted_dists(1,k))){
         connections(i,sorted_dists(1,k)) = 1;
         connections(sorted_dists(1,k),i) = 1; //If i is connected to j, then j is connected to i
       }
@@ -617,14 +544,39 @@ Eigen::MatrixXf GenerateProbabilisticRoadMap(Eigen::MatrixXd &obstacleMap, Eigen
 
   //The milestones and the connections have been made. Time to find the shortest path.
 
-  std::vector<int> indices; //Indices of milestones which reprsesent shortest path to destination
   marker_publisher.publish(line_list);
-  a_star(milestones, connections, 0, 1, numMilestones);
-  
 
-  return points;
+  visualization_msgs::Marker marker;
+  std_msgs::ColorRGBA color;
+  marker.id = 0;
+  marker.scale.x = 0.1;
+  marker.scale.y = 0.1;
+  marker.scale.z = 0.1;
+  marker.header.frame_id = "/base_link";
+  marker.type = visualization_msgs::Marker::POINTS;
+  marker.points.clear();
+  marker.colors.clear();
+  for(int i = 0; i < numNodes; i++){
+    p.x = points(0,i);
+    p.y = points(1,i);
+    color.r = points(2,i);
+    color.g = points(2,i);
+    color.b = points(2,i);
+    color.a = 1;
+    marker.points.push_back(p);
+    marker.colors.push_back(color);
+  }
 
+  marker_publisher.publish(marker);
+  Eigen::ArrayXd spath;
 
+  spath = a_star(milestones, connections, 0, 1, numMilestones);
+  Eigen::MatrixXf waypoints(2, spath.size());
+  for(int i=0;i<spath.size();i++){
+    waypoints(0,i) = milestones(0,spath(i));
+    waypoints(1,i) = milestones(1,spath(i));
+  }
+  return waypoints;
 }
 
 int main(int argc, char **argv)
@@ -644,46 +596,85 @@ int main(int argc, char **argv)
     //Velocity control variable
     geometry_msgs::Twist vel;
     geometry_msgs::Point point;
-    Eigen::MatrixXf points;
+    Eigen::MatrixXf waypoints;
     //Set the loop rate
     ros::Rate loop_rate(20);    //20Hz update rate
     int numNodes = 500;
-    std_msgs::ColorRGBA color;
-
+    int cWP; //current waypoint
+    double th;
+    bool prmComplete = false;
+    double dY;
+    double dX;
+    Eigen::MatrixXf start(2,1);
+    Eigen::MatrixXf end(2,1);
+    start(0) = 1;
+    start(1) = 5;
+    end(0) = 4;
+    end(1) = 5;
     while (ros::ok())
     {
       loop_rate.sleep(); //Maintain the loop rate
       ros::spinOnce();   //Check for new messages
-      Eigen::MatrixXd nodeMap = Eigen::MatrixXd::Zero(100,100);   
-      if(mapComplete){
-        points = GenerateProbabilisticRoadMap(map,nodeMap,numNodes);
-
-        marker.id = 0;
-        marker.scale.x = 0.1;
-        marker.scale.y = 0.1;
-        marker.scale.z = 0.1;
-        marker.header.frame_id = "/base_link";
-        marker.type = visualization_msgs::Marker::POINTS;
-        marker.points.clear();
-        marker.colors.clear();
-        for(int i = 0; i < numNodes; i++){
-          point.x = points(0,i);
-          point.y = points(1,i);
-          color.r = points(2,i);
-          color.g = points(2,i);
-          color.b = points(2,i);
-          color.a = 1;
-          marker.points.push_back(point);
-          marker.colors.push_back(color);
+      if(mapComplete && !prmComplete){
+        waypoints = GenerateProbabilisticRoadMap(map,numNodes,start,end);
+        for(int i=waypoints.cols()-2;i>=0;i--){
+          ROS_INFO("waypoints(0,%d): %f, waypoints(1,%d): %f",i,waypoints(0,i),i,waypoints(1,i));
+          //Need to map waypoints to gazebo coordinate system
+          waypoints(0,i) -= 1;
+          waypoints(1,i) -= 5;
+          ROS_INFO("transformed: waypoints(0,%d): %f, waypoints(1,%d): %f",i,waypoints(0,i),i,waypoints(1,i));
         }
-
-        //Main loop code goes here:
-        vel.linear.x = 0; // set linear speed
-        vel.angular.z = 0; // set angular speed
-        
-        velocity_publisher.publish(vel); // Publish the command velocity
-        marker_publisher.publish(marker);
+        prmComplete = true;
+        cWP = waypoints.cols()-2;
       }
+
+      ////////////// This is my bad path following code, you can ignore it
+
+      // dY = waypoints(1,cWP) - YPos;
+      // dX = waypoints(0,cWP) - XPos;
+      // th = atan(dY/dX);
+      // if(th < 0 && dX < 0 && dY > 0){
+      //   th = -th;
+      //   ROS_INFO("th < 0");
+      // }
+      // else if(th < 0 && dX > 0 && dY < 0){
+      //   th = th + 2*M_PI;
+      //   ROS_INFO("th < 0");
+      // }
+      // if(th > 2*M_PI){
+      //   th = th - 2*M_PI;
+      //   ROS_INFO("th > 2pi");
+      // }
+      // if(fabs(th-theta)<0.01){
+      //   vel.angular.z = 0;
+      //   vel.linear.x = 0.15;
+      //   ROS_INFO("Moving to: %f, %f",waypoints(0,cWP),waypoints(1,cWP));
+      //   ROS_INFO("current X: %f, current Y: %f, current th: %f, target th: %f",XPos, YPos,theta,th);
+      //   if(get_dist(XPos,YPos,waypoints(0,cWP),waypoints(1,cWP))<0.05){
+      //     cWP -= 1; //Move to next waypoint;
+      //     ROS_INFO("next waypoint");
+      //   }
+      // } else {
+      //   if( theta > th && (theta - th) < M_PI ){
+      //     vel.angular.z = -0.3;
+      //   } 
+      //   else if( theta < th && (th - theta) > M_PI) {
+      //     vel.angular.z = -0.3;
+      //   }
+      //   else if( theta < th && (th - theta) < M_PI){
+      //     vel.angular.z = 0.3;
+      //   }
+      //   else if( theta > th && (theta - th) > M_PI){
+      //     vel.angular.z = 0.3;
+      //   }
+      //   vel.linear.x = 0;
+      //   ROS_INFO("Moving to: %f rads, currently at %f rads",th,theta);
+      // }
+      // velocity_publisher.publish(vel);
+      // ROS_INFO("WP: %d",cWP);
+
+      /////////////////
+
     }
     return 0;
 }
