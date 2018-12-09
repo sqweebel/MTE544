@@ -26,6 +26,7 @@
 #include <std_msgs/ColorRGBA.h>
 ros::Publisher marker_publisher;
 #define TAGID 0
+#define PI 3.141592654
 //Callback function for the Position topic (LIVE)
 double XPos,YPos, theta;
 Eigen::MatrixXd map(100,100);
@@ -554,87 +555,88 @@ Eigen::MatrixXf GenerateProbabilisticRoadMap(Eigen::MatrixXd &obstacleMap, int n
   return waypoints;
 }
 
-void followWaypoints(Eigen::MatrixXf &waypoints,geometry_msgs::Twist vel,ros::Publisher velocity_publisher){
+double correctTo2Pi(double angle){
+  double newAngle = angle;
+  if(angle<0){
+    newAngle += 2*PI;
+  }
+  else if(angle > 2*PI){
+    newAngle -= 2*PI;
+  }else{
+    //ROS_INFO("PI Correction Not Needed");
+  }
+  return newAngle;
+}
+
+void determineNewHeading(double nextX, double nextY, double &linearSpeed, double &turnSpeed){
       
-      /*
-        NOTE THAT THE MILESTONES HAVE TO BE SHIFTED TO MATCH XPOS AND YPOS WHICH START AT 0
-      */
-       
-      double nextMilestoneX;
-      double nextMilestoneY;
-      float dist  = 0;
-      float th = 0; //robot to point angle
-      int error = 0;
-      float large = 30*3.1415/180; //30 degrees
+      
+      double desiredTheta = 0; //robot to point angle
+      double difference = 0;
+      double largeAngle = 30*3.1415/180; //30 degrees
       int heading = 0; //rads      
+      double rotSpeed = 0.2;
+      double linVel = 0.1;
       int limit = 0.75;
+      double thetaOverflowCheck = 0;
+      double desiredOverflowCheck = 0;      
       float dY = 0;
       float dX = 0;
-      int turnSpeed = 0.5;
-      double robotTheta = 0;
-      int linearSpeed = 0.2;
+      float tolerance = 5*PI/180;
+      dY = nextY-YPos;
+      dX = nextX-XPos;
+      ROS_INFO("dy %f", dY);
+      ROS_INFO("dx %f", dX);
+      desiredTheta = atan(dY/dX);
+      desiredTheta = correctTo2Pi(desiredTheta);    
+      
+      ROS_INFO("th is %f", desiredTheta);
+      ROS_INFO("theta is %f", theta);
 
-    
-      ROS_INFO("%d",waypoints.cols());
-      for(int i = waypoints.cols()-2; i >=0;i--){ //so next milestones won't hit -1
-        ROS_INFO("Going into for loop");
-        nextMilestoneX = waypoints(0,i)-5;  //Shifted MilestonesY    
-        nextMilestoneY = waypoints(1,i)-5;
-        ros::spinOnce(); 
-        dist = get_dist(XPos,YPos,nextMilestoneX,nextMilestoneY);
-        dX = nextMilestoneY - YPos;
-        dY = nextMilestoneX - XPos;
-        for(int k = 0; k < waypoints.cols(); k++){
-          ROS_INFO("%lf , %lf ",waypoints(0,k),waypoints(1,k));
-        }
-        ROS_INFO("Going into while loop");
-        while(dist > limit){ //p_control  
-            ros::spinOnce();       
+      difference = desiredTheta - theta;
+      ROS_INFO("difference: %f", difference);
 
-            th = atan(dY/dX); //does NOT get heading, only position relative to the point
-            robotTheta = theta-(3.1415/2);
-            
-            if(dist < 2){
-              linearSpeed = 0.4;
-            }
-            else{
-              linearSpeed = 0.3;
-            }
-            if(theta-th < -0.1){
-              vel.linear.x = linearSpeed;
-              vel.angular.z = 0.2; //positive is a left turn              
-            }
-            else if(theta-th > 0.1){
-              vel.angular.z = -0.2;
-              vel.linear.x = linearSpeed;                          
-            }
-            else{
-              vel.angular.z = 0;
-              vel.linear.x = linearSpeed;
-            }
-            vel.linear.x = linearSpeed;
-            ROS_INFO("%f", vel.linear.x);
-            /*ROS_INFO("Xstone:      %f",nextMilestoneX );
-            ROS_INFO("Ystone : %f",nextMilestoneY);
-            ROS_INFO("XPos : %f", XPos);
-            ROS_INFO("YPos : %f", YPos);             
-            //ROS_INFO("heading: %f", heading)*/
-            dist = get_dist(XPos,YPos,nextMilestoneX,nextMilestoneY);
-            //ROS_INFO("dist : %f",dist);
-            //printf("MilestonesY %Lf \n",nextMilestoneY);
-            dX = nextMilestoneY - YPos;
-            dY = nextMilestoneX - XPos;
-            //ROS_INFO("dY : %f",dY);
-            //ROS_INFO("dX : %f",dX);
-            velocity_publisher.publish(vel);
-                  
-        }
-       
-    }
-    vel.linear.x = 0;
-    vel.angular.z = 0;
-    velocity_publisher.publish(vel);
+      thetaOverflowCheck = correctTo2Pi(theta+PI);
+      desiredOverflowCheck = correctTo2Pi(desiredTheta+PI);
+
+      rotSpeed = 0.3*abs(difference); //the larger the difference the greater the rotation speed
+      linearSpeed = 0.05;
+
+      if(theta >= PI && thetaOverflowCheck > desiredTheta){ //Overflow case, theta in quadrant 3/4 and desired theta in quadrant 1, faster to turn left
+        ROS_INFO("1");
+        turnSpeed = rotSpeed; //positive is a left turn
+        linVel = 0;              
+      }
+      else if(desiredTheta >= PI && desiredOverflowCheck > theta){ //Overflow case 2, desired theta in quadrant 3/4 and theta in quadrant 1, faster to turn right        
+         ROS_INFO("2");
+         turnSpeed = -rotSpeed;
+         linVel = 0;                                   
+      }
+      else if(abs(difference) < tolerance){ //want it to go straight within a certain tolerance, just not sure what that tolerance should be. 5 degrees first guess.
+        ROS_INFO("3");
+        turnSpeed = 0;
+        linVel = 0.1;        
+      }
+      else if(difference > 0 + tolerance){
+        ROS_INFO("4");
+        turnSpeed = rotSpeed;
+        linVel = 0;
+      }
+      else if(difference < 0 - tolerance){
+        ROS_INFO("5");
+        turnSpeed = -rotSpeed;
+        linVel = 0;
+      }else{
+        ROS_INFO("6");
+      }
+      linearSpeed = linVel;
+         
 }
+
+void wait(){
+  for(int i = 0; i < 5*100000; i++);
+}
+       
 
 int main(int argc, char **argv)
 {
@@ -647,11 +649,13 @@ int main(int argc, char **argv)
     //Setup topics to Publish from this node
     ros::Publisher velocity_publisher = n.advertise<geometry_msgs::Twist>("/cmd_vel_mux/input/navi", 1);
     marker_publisher = n.advertise<visualization_msgs::Marker>("visualization_marker", 1, true);
-    //Velocity control variable
+     //Velocity control variable
     geometry_msgs::Twist vel;
     geometry_msgs::Point point;
     Eigen::MatrixXf path;
     Eigen::MatrixXf waypoints;
+    
+
     int wp_size1 = 0;
     int wp_size2 = 0;
     //Set the loop rate
@@ -662,6 +666,11 @@ int main(int argc, char **argv)
     int prmComplete = 0;
     double dY;
     double dX;
+    float limit = 0.6;
+    double linearSpeed = 0;
+    double angularSpeed = 0;
+    double nextPointY = 0;
+    double nextPointX = 0;
     Eigen::MatrixXf start(2,1);
     Eigen::MatrixXf goals(2,3);
     start(0,0) = 1;
@@ -672,11 +681,16 @@ int main(int argc, char **argv)
     goals(1,1) = 1;
     goals(0,2) = 9;
     goals(1,2) = 5;
-    int ind = 0;
-    while (ros::ok())
-    {
+    int ind = 0;  
+
+    while(!mapComplete){
+      loop_rate.sleep();
+      ros::spinOnce();
+    }
+    while(mapComplete && prmComplete != 3){
       loop_rate.sleep(); //Maintain the loop rate
-      ros::spinOnce();   //Check for new messages
+      ros::spinOnce();
+      ROS_INFO("%d", prmComplete);
       if(mapComplete && prmComplete != 3){
         path = GenerateProbabilisticRoadMap(map,numNodes,start,goals.col(prmComplete));
         wp_size2 = wp_size1 + path.cols();
@@ -691,7 +705,8 @@ int main(int argc, char **argv)
         start = goals.col(prmComplete);
         prmComplete++;
         ROS_INFO("prmComplete: %d",prmComplete);
-      } else {
+      }
+      else {
         ROS_INFO("path size: %ld",waypoints.cols());
         for(int i=0;i<waypoints.cols();i++){
           //ROS_INFO("path(0,%d): %f, path(1,%d): %f",i,cPath(0,i),i,cPath(1,i));
@@ -719,11 +734,84 @@ int main(int argc, char **argv)
           line_list3.points.push_back(p);
         }
         marker_publisher.publish(line_list3);
-        //ros::shutdown();
       }
-      if(mapComplete && prmComplete != 3){
-          followWaypoints(waypoints,vel,velocity_publisher);          
-      }  
+    }
+    Eigen::MatrixXf remappedWaypoints(waypoints.rows(),waypoints.cols());
+    for(int k = 0; k < waypoints.cols(); k++){
+
+          remappedWaypoints(0,k) = waypoints(0,k)-1;
+          remappedWaypoints(1,k) = waypoints(1,k)-5;
+          ROS_INFO("X: %lf ,Y: %lf ",remappedWaypoints(0,k),remappedWaypoints(1,k));
+    }
+    wait();
+    wait();
+
+
+    int wayPointsIndex = 1;
+    double dist = 0;
+    while (ros::ok()) //Main Loop
+    {
+      loop_rate.sleep(); //Maintain the loop rate
+      ros::spinOnce();   //Check for new messages      
+      
+      if(wayPointsIndex <= waypoints.cols()-1){
+          //ROS_INFO("XPOS %f", XPos);
+          //ROS_INFO("YPOS %f", YPos);
+
+          nextPointY = remappedWaypoints(0,wayPointsIndex);//I will never understand the X Y mapping
+          nextPointX = remappedWaypoints(1,wayPointsIndex);
+          ROS_INFO("Y Pos %f", YPos);
+          ROS_INFO("X Pos %f", XPos);
+          dist = get_dist(XPos, YPos, nextPointX, nextPointY);
+          ROS_INFO("xPoint %f", nextPointX);
+          ROS_INFO("yPoint %f", nextPointY);
+          ROS_INFO("dist %f", dist);
+          ROS_INFO("rotation %f", angularSpeed);
+
+          if(dist > limit){
+            determineNewHeading(nextPointX, nextPointY, linearSpeed, angularSpeed);            
+            
+            //ROS_INFO("linearSpeed %f", linearSpeed);
+            //ROS_INFO("angleSpeed %f", angularSpeed);
+
+            vel.linear.x = linearSpeed;
+            vel.angular.z = angularSpeed;
+          }
+          else{
+            ROS_INFO("Y Point %f", nextPointY);
+            ROS_INFO("X Point %f", nextPointX);
+            wait();
+            wayPointsIndex++;
+            ROS_INFO("index %f", wayPointsIndex);
+          }
+
+      }
+      else{
+          vel.linear.x = 0;
+          vel.angular.z = 0;          
+      } 
+      
+      velocity_publisher.publish(vel);
+      /*
+      vel.angular.z = -0.5; //turns right
+      velocity_publisher.publish(vel);
+      for(int i = 0; i < 5*10000; i++){
+        ROS_INFO("%d \n",-1*i);
+      };
+
+      vel.angular.z = 0;
+      velocity_publisher.publish(vel);
+      for(int i = 0; i < 10000; i++){
+        ROS_INFO("Waiting");
+      }
+
+      vel.angular.z = 0.5; //turns left
+      velocity_publisher.publish(vel);
+      for(int i = 0; i < 5*10000; i++){
+        ROS_INFO("%d \n",i);
+      };  */
+          //followWaypoints(waypoints,vel,velocity_publisher);          
+        
       // else{
       //   visualization_msgs::Marker line_list3;
       //   line_list3.id = 4;
